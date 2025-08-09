@@ -6,15 +6,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class OrderItem extends Model
+class CartItem extends Model
 {
     use HasFactory;
 
     protected $fillable = [
-        'order_id',
+        'cart_id',
         'product_id',
         'variant_id',
-        'product_name',
         'price',
         'qty',
         'subtotal',
@@ -32,9 +31,9 @@ class OrderItem extends Model
     ];
 
     // Relationships
-    public function order(): BelongsTo
+    public function cart(): BelongsTo
     {
-        return $this->belongsTo(Order::class);
+        return $this->belongsTo(Cart::class);
     }
 
     public function product(): BelongsTo
@@ -65,7 +64,7 @@ class OrderItem extends Model
 
     public function getDisplayNameAttribute(): string
     {
-        $name = $this->product_name;
+        $name = $this->product->name;
 
         if ($this->variant) {
             $name .= ' - ' . $this->variant->name;
@@ -75,47 +74,53 @@ class OrderItem extends Model
     }
 
     // Methods
-    public static function createFromCartItem(CartItem $cartItem, int $orderId): self
+    public function updateQuantity(int $quantity): void
     {
-        return self::create([
-            'order_id' => $orderId,
-            'product_id' => $cartItem->product_id,
-            'variant_id' => $cartItem->variant_id,
-            'product_name' => $cartItem->product->name, // Snapshot of product name
-            'price' => $cartItem->price,
-            'qty' => $cartItem->qty,
-            'subtotal' => $cartItem->subtotal,
-        ]);
+        $this->qty = $quantity;
+        $this->save();
     }
 
-    public function getVariantInfo(): ?array
+    public function increaseQuantity(int $quantity = 1): void
     {
-        if (!$this->variant) {
-            return null;
+        $this->qty += $quantity;
+        $this->save();
+    }
+
+    public function decreaseQuantity(int $quantity = 1): void
+    {
+        $newQty = max(1, $this->qty - $quantity);
+        $this->qty = $newQty;
+        $this->save();
+    }
+
+    public function getAvailableStock(): int
+    {
+        if ($this->variant) {
+            return $this->variant->stock;
         }
 
-        return [
-            'id' => $this->variant->id,
-            'name' => $this->variant->name,
-            'attributes' => $this->variant->attributes,
-            'sku' => $this->variant->sku,
-        ];
+        return $this->product->stock ?? 0;
+    }
+
+    public function canIncreaseQuantity(int $quantity = 1): bool
+    {
+        $availableStock = $this->getAvailableStock();
+        return ($this->qty + $quantity) <= $availableStock;
     }
 
     // Events
     protected static function booted(): void
     {
-        static::saving(function (OrderItem $orderItem) {
-            $orderItem->subtotal = $orderItem->price * $orderItem->qty;
+        static::saving(function (CartItem $cartItem) {
+            $cartItem->subtotal = $cartItem->price * $cartItem->qty;
         });
 
-        static::created(function (OrderItem $orderItem) {
-            // Decrease stock when order item is created
-            if ($orderItem->variant) {
-                $orderItem->variant->decreaseStock($orderItem->qty);
-            } elseif ($orderItem->product) {
-                $orderItem->product->decreaseStock($orderItem->qty);
-            }
+        static::saved(function (CartItem $cartItem) {
+            $cartItem->cart->calculateTotals();
+        });
+
+        static::deleted(function (CartItem $cartItem) {
+            $cartItem->cart->calculateTotals();
         });
     }
 }

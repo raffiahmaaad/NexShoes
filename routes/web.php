@@ -2,6 +2,9 @@
 
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
+use App\Http\Controllers\CartController;
+use App\Http\Controllers\CheckoutController;
+use App\Http\Controllers\OrderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,11 +20,11 @@ Route::view('/contact', 'pages.contact')->name('contact');
 
 Route::get('/products', function () {
     return view('pages.products.index');
-});
+})->name('products.index');
 
 Route::get('/products/{slug}', function ($slug) {
     return view('pages.products.[slug]', compact('slug'));
-});
+})->name('products.show');
 
 
 /*
@@ -44,6 +47,33 @@ Route::middleware(['auth', 'verified', 'role:customer'])->group(function () {
         Volt::route('profile', 'settings.profile')->name('profile');
         Volt::route('password', 'settings.password')->name('password');
         Volt::route('appearance', 'settings.appearance')->name('appearance');
+    });
+
+    // Cart Routes - Hanya untuk customer yang sudah login
+    Route::prefix('cart')->name('cart.')->group(function () {
+        Route::get('/', [CartController::class, 'index'])->name('index');
+        Route::post('/add', [CartController::class, 'addItem'])->name('add');
+        Route::patch('/update/{id}', [CartController::class, 'updateQuantity'])->name('update');
+        Route::delete('/remove/{id}', [CartController::class, 'removeItem'])->name('remove');
+        Route::delete('/clear', [CartController::class, 'clear'])->name('clear');
+    });
+
+    // Checkout Routes - Hanya untuk customer yang sudah login
+    Route::prefix('checkout')->name('checkout.')->group(function () {
+        Route::get('/', [CheckoutController::class, 'index'])->name('index');
+        Route::post('/process', [CheckoutController::class, 'process'])->name('process');
+        Route::get('/success/{order}', [CheckoutController::class, 'success'])->name('success');
+        Route::get('/cancel', [CheckoutController::class, 'cancel'])->name('cancel');
+    });
+
+    // Route untuk cart dan checkout tanpa prefix (untuk backward compatibility)
+    Route::get('/cart', [CartController::class, 'index'])->name('cart');
+    Route::get('/checkout', [CheckoutController::class, 'index'])->name('checkout');
+
+    // Order History - untuk melihat riwayat pesanan
+    Route::prefix('orders')->name('orders.')->group(function () {
+        Route::get('/', [OrderController::class, 'index'])->name('index');
+        Route::get('/{order}', [OrderController::class, 'show'])->name('show');
     });
 
     // Anda bisa menambahkan rute customer lain yang butuh login di sini...

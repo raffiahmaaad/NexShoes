@@ -4,35 +4,16 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
 use App\Filament\Resources\OrderResource\RelationManagers;
-use App\Filament\Resources\OrderResource\RelationManagers\AddressRelationManager;
-use App\Filament\Resources\OrderResource\Widgets\OrderStats as WidgetsOrderStats;
 use App\Models\Order;
-use App\Models\Product;
 use Filament\Forms;
-use Filament\Forms\Components\Group;
-use Filament\Forms\Components\Hidden;
-use Filament\Forms\Components\Placeholder;
-use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Section;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\ToggleButtons;
 use Filament\Forms\Form;
-use Filament\Forms\Get;
-use Filament\Forms\Set;
 use Filament\Resources\Resource;
-use Filament\Support\RawJs;
 use Filament\Tables;
-use Filament\Tables\Columns\SelectColumn;
-use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Filament\Infolists;
+use Filament\Infolists\Infolist;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
-use Illuminate\Support\Number;
-use Livewire\Attributes\Reactive;
-use App\Filament\Widgets\OrderStats;
+use Illuminate\Support\Facades\Auth;
 
 class OrderResource extends Resource
 {
@@ -40,276 +21,347 @@ class OrderResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-bag';
 
-    // protected static ?string $navigationGroup = 'Orders';
+    protected static ?string $navigationGroup = 'Sales';
 
-    protected static ?int $navigationSort = 2;
-
-    // protected static ?string $recordTitleAttribute = 'payment_method';
-
+    protected static ?int $navigationSort = 1;
 
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
-                Group::make()->schema([
-                    Section::make('Order Information')->schema([
-                        Select::make('user_id')
-                            ->label('Customer')
-                            ->relationship('user', 'name')
-                            ->searchable()
-                            ->preload()
-                            ->required(),
-
-                        Select::make('payment_method')
-                            ->label('Payment Method')
-                            ->options([
-                                'QRIS' => 'QRIS',
-                                'PayPal' => 'PayPal',
-                                'Bank Transfer' => 'Bank Transfer',
-                            ])
-                            ->required(),
-
-                        Select::make('payment_status')
-                            ->label('Payment Status')
+                Forms\Components\Section::make('Order Information')
+                    ->schema([
+                        Forms\Components\TextInput::make('number')
+                            ->label('Order Number')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\Select::make('status')
                             ->options([
                                 'pending' => 'Pending',
                                 'paid' => 'Paid',
                                 'failed' => 'Failed',
-                            ])
-                            ->default('pending')
-                            ->required(),
-
-                        ToggleButtons::make('status')
-                            ->inline()
-                            ->default('new')
-                            ->required()
-                            ->label('Order Status')
-                            ->options([
-                                'new' => 'New',
-                                'processing' => 'Processing',
+                                'canceled' => 'Canceled',
                                 'shipped' => 'Shipped',
-                                'delivered' => 'Delivered',
-                                'cancelled' => 'Cancelled',
+                                'completed' => 'Completed',
                             ])
-                            ->colors([
-                                'new' => 'info',
-                                'processing' => 'warning',
-                                'shipped' => 'success',
-                                'delivered' => 'success',
-                                'cancelled' => 'danger',
-                            ])
-                            ->icons([
-                                'new' => 'heroicon-m-sparkles',
-                                'processing' => 'heroicon-m-arrow-path',
-                                'shipped' => 'heroicon-m-truck',
-                                'delivered' => 'heroicon-m-check-badge',
-                                'cancelled' => 'heroicon-m-x-circle',
-                            ]),
-
-                        Select::make('currency')
-                            ->label('Currency')
-                            ->options([
-                                'IDR' => 'IDR',
-                                'USD' => 'USD',
-                                'EUR' => 'EUR',
-                            ])
-                            ->default('IDR')
-                            ->required(),
-
-                        Select::make('shipping_method')
                             ->required()
-                            ->label('Shipping Method')
-                            ->options([
-                                'fedex' => 'Fed Express (Luar Negeri)',
-                                'dhl' => 'DHL (Luar Negeri)',
-                                'pos' => 'Pos Indonesia (Luar & Dalam Negeri)',
-                                'jnt' => 'JNT (Dalam Negeri)',
-                                'jne' => 'JNE (Dalam Negeri)',
-                            ]),
-
-                        Textarea::make('notes')
-                            ->label('Notes')
-                            ->columnSpanFull()
-                    ])->columns(2),
-
-                    Section::make('Order Items')->schema([
-                        Repeater::make('items')
-                            ->relationship()
-                            ->schema([
-                                Select::make('product_id')
-                                    ->relationship('product', 'name')
-                                    ->searchable()
-                                    ->preload()
-                                    ->required()
-                                    ->distinct()
-                                    ->columnSpan(4)
-                                    ->reactive()
-                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                        $product = Product::find($state);
-                                        $price = $product?->price ?? 0;
-                                        $set('unit_amount', $price);
-                                        $set('total_amount', $price * ($get('quantity') ?? 1));
-                                        self::updateGrandTotal($get, $set);
-                                    })
-                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
-
-                                TextInput::make('quantity')
-                                    ->required()
-                                    ->numeric()
-                                    ->default(1)
-                                    ->minValue(1)
-                                    ->columnSpan(2)
-                                    ->reactive()
-                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                        $unitAmount = $get('unit_amount') ?? 0;
-                                        $set('total_amount', $state * $unitAmount);
-                                        self::updateGrandTotal($get, $set);
-                                    }),
-
-                                TextInput::make('unit_amount')
-                                    ->numeric()
-                                    ->disabled()
-                                    ->dehydrated()
-                                    ->columnSpan(3),
-
-                                TextInput::make('total_amount')
-                                    ->numeric()
-                                    ->required()
-                                    ->dehydrated()
-                                    ->columnSpan(3)
-                                    ->reactive()
-                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::updateGrandTotal($get, $set)),
-                            ])
-                            ->columns(12)
-                            ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::updateGrandTotal($get, $set))
-                            ->deleteAction(
-                                fn ($action) => $action->after(fn (Set $set, Get $get) => self::updateGrandTotal($get, $set))
-                            ),
-
-                        Placeholder::make('grand_total_placeholder')
-                            ->label('Grand Total')
-                            ->content(function (Get $get) {
-                                $total = 0;
-                                if (!$repeaters = $get('items')) {
-                                    return Number::currency($total, 'IDR');
-                                }
-                                foreach ($repeaters as $key => $repeater) {
-                                    $total += $get("items.{$key}.total_amount") ?? 0;
-                                }
-                                return Number::currency($total, 'IDR');
-                            }),
-
-                        Hidden::make('grand_total')
-                            ->default(0)
-                            ->dehydrated(),
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('payment_method')
+                            ->label('Payment Method')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('payment_reference')
+                            ->label('Payment Reference')
+                            ->disabled()
+                            ->columnSpan(1),
                     ])
-                ])->columnSpanFull(),
+                    ->columns(2),
+
+                Forms\Components\Section::make('Shipping Information')
+                    ->schema([
+                        Forms\Components\TextInput::make('shipping_name')
+                            ->label('Name')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('shipping_phone')
+                            ->label('Phone')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\Textarea::make('shipping_street')
+                            ->label('Street Address')
+                            ->disabled()
+                            ->columnSpanFull(),
+                        Forms\Components\TextInput::make('shipping_city')
+                            ->label('City')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('shipping_province')
+                            ->label('Province')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('shipping_postal_code')
+                            ->label('Postal Code')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('shipping_method')
+                            ->label('Shipping Method')
+                            ->disabled()
+                            ->columnSpan(1),
+                    ])
+                    ->columns(2),
+
+                Forms\Components\Section::make('Order Totals')
+                    ->schema([
+                        Forms\Components\TextInput::make('subtotal')
+                            ->label('Subtotal')
+                            ->prefix('Rp')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('shipping_total')
+                            ->label('Shipping')
+                            ->prefix('Rp')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('discount_total')
+                            ->label('Discount')
+                            ->prefix('Rp')
+                            ->disabled()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('grand_total')
+                            ->label('Grand Total')
+                            ->prefix('Rp')
+                            ->disabled()
+                            ->columnSpan(1),
+                    ])
+                    ->columns(2),
+
+                Forms\Components\Section::make('Notes')
+                    ->schema([
+                        Forms\Components\Textarea::make('notes')
+                            ->label('Order Notes')
+                            ->disabled()
+                            ->columnSpanFull(),
+                    ])
+                    ->collapsible()
+                    ->collapsed(),
             ]);
     }
 
-    // Function helper untuk update grand total
-    protected static function updateGrandTotal(Get $get, Set $set): void
+    public static function table(Table $table): Table
     {
-        $total = 0;
-        if ($repeaters = $get('items')) {
-            foreach ($repeaters as $key => $repeater) {
-                $total += $get("items.{$key}.total_amount") ?? 0;
-            }
-        }
-        $set('grand_total', $total);
+        return $table
+            ->columns([
+                Tables\Columns\TextColumn::make('number')
+                    ->label('Order #')
+                    ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('user.name')
+                    ->label('Customer')
+                    ->searchable()
+                    ->sortable()
+                    ->placeholder('Guest'),
+                Tables\Columns\TextColumn::make('status')
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
+                        'pending' => 'warning',
+                        'paid' => 'success',
+                        'shipped' => 'info',
+                        'completed' => 'success',
+                        'failed' => 'danger',
+                        'canceled' => 'gray',
+                    })
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('grand_total')
+                    ->label('Total')
+                    ->money('IDR')
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('payment_method')
+                    ->label('Payment')
+                    ->placeholder('Not specified'),
+                Tables\Columns\TextColumn::make('shipping_city')
+                    ->label('Ship To')
+                    ->placeholder('Not specified'),
+                Tables\Columns\TextColumn::make('created_at')
+                    ->label('Order Date')
+                    ->dateTime()
+                    ->sortable(),
+            ])
+            ->filters([
+                Tables\Filters\SelectFilter::make('status')
+                    ->options([
+                        'pending' => 'Pending',
+                        'paid' => 'Paid',
+                        'failed' => 'Failed',
+                        'canceled' => 'Canceled',
+                        'shipped' => 'Shipped',
+                        'completed' => 'Completed',
+                    ])
+                    ->multiple(),
+                Tables\Filters\Filter::make('created_at')
+                    ->form([
+                        Forms\Components\DatePicker::make('created_from')
+                            ->label('Order Date From'),
+                        Forms\Components\DatePicker::make('created_until')
+                            ->label('Order Date Until'),
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(
+                                $data['created_from'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('created_at', '>=', $date),
+                            )
+                            ->when(
+                                $data['created_until'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('created_at', '<=', $date),
+                            );
+                    }),
+            ])
+            ->actions([
+                Tables\Actions\ViewAction::make(),
+                Tables\Actions\EditAction::make()
+                    ->visible(fn (Order $record): bool => $record->status !== 'completed'),
+                Tables\Actions\Action::make('mark_paid')
+                    ->label('Mark as Paid')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->action(fn (Order $record) => $record->update(['status' => 'paid']))
+                    ->visible(fn (Order $record): bool => $record->status === 'pending')
+                    ->requiresConfirmation()
+                    ->modalHeading('Mark Order as Paid')
+                    ->modalDescription('Are you sure you want to mark this order as paid?'),
+                Tables\Actions\Action::make('mark_shipped')
+                    ->label('Mark as Shipped')
+                    ->icon('heroicon-o-truck')
+                    ->color('info')
+                    ->action(fn (Order $record) => $record->update(['status' => 'shipped']))
+                    ->visible(fn (Order $record): bool => $record->status === 'paid')
+                    ->requiresConfirmation()
+                    ->modalHeading('Mark Order as Shipped')
+                    ->modalDescription('Are you sure you want to mark this order as shipped?'),
+                Tables\Actions\Action::make('mark_completed')
+                    ->label('Mark as Completed')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->action(fn (Order $record) => $record->update(['status' => 'completed']))
+                    ->visible(fn (Order $record): bool => $record->status === 'shipped')
+                    ->requiresConfirmation()
+                    ->modalHeading('Mark Order as Completed')
+                    ->modalDescription('Are you sure you want to mark this order as completed?'),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\DeleteBulkAction::make()
+                        ->visible(function (): bool {
+                            $user = Auth::user();
+                            return $user ? $user->can('delete_orders') : false;
+                        }),
+                    Tables\Actions\BulkAction::make('mark_shipped')
+                        ->label('Mark as Shipped')
+                        ->icon('heroicon-o-truck')
+                        ->color('info')
+                        ->action(function ($records) {
+                            $records->each(function ($record) {
+                                if ($record->status === 'paid') {
+                                    $record->update(['status' => 'shipped']);
+                                }
+                            });
+                        })
+                        ->requiresConfirmation()
+                        ->modalHeading('Mark Selected Orders as Shipped')
+                        ->modalDescription('This will mark all selected paid orders as shipped.'),
+                ]),
+            ])
+            ->defaultSort('created_at', 'desc');
     }
 
-    public static function table(Table $table): Table
-{
-    return $table
-        ->columns([
-            TextColumn::make('user.name')
-                ->label('Customer')
-                ->searchable(),
+    public static function infolist(Infolist $infolist): Infolist
+    {
+        return $infolist
+            ->schema([
+                Infolists\Components\Section::make('Order Details')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('number')
+                            ->label('Order Number'),
+                        Infolists\Components\TextEntry::make('status')
+                            ->badge()
+                            ->color(fn (string $state): string => match ($state) {
+                                'pending' => 'warning',
+                                'paid' => 'success',
+                                'shipped' => 'info',
+                                'completed' => 'success',
+                                'failed' => 'danger',
+                                'canceled' => 'gray',
+                            }),
+                        Infolists\Components\TextEntry::make('user.name')
+                            ->label('Customer')
+                            ->placeholder('Guest Order'),
+                        Infolists\Components\TextEntry::make('created_at')
+                            ->label('Order Date')
+                            ->dateTime(),
+                        Infolists\Components\TextEntry::make('payment_method')
+                            ->label('Payment Method')
+                            ->placeholder('Not specified'),
+                        Infolists\Components\TextEntry::make('payment_reference')
+                            ->label('Payment Reference')
+                            ->placeholder('Not specified'),
+                    ])
+                    ->columns(2),
 
-            // --- PERBAIKAN UTAMA ADA DI SINI ---
-            TextColumn::make('grand_total')
-                ->label('Totals')
-                ->numeric()
-                ->sortable()
-                ->money('IDR')
-                ->getStateUsing(function ($record) {
-                    // Selalu hitung ulang total dari relasi 'items' untuk data realtime.
-                    // Ini memastikan nilai yang ditampilkan di tabel selalu akurat.
-                    return $record->items->sum('total_amount');
-                }),
+                Infolists\Components\Section::make('Shipping Information')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('shipping_name')
+                            ->label('Recipient Name'),
+                        Infolists\Components\TextEntry::make('shipping_phone')
+                            ->label('Phone Number'),
+                        Infolists\Components\TextEntry::make('shipping_street')
+                            ->label('Street Address')
+                            ->columnSpanFull(),
+                        Infolists\Components\TextEntry::make('shipping_city')
+                            ->label('City'),
+                        Infolists\Components\TextEntry::make('shipping_province')
+                            ->label('Province'),
+                        Infolists\Components\TextEntry::make('shipping_postal_code')
+                            ->label('Postal Code'),
+                        Infolists\Components\TextEntry::make('shipping_method')
+                            ->label('Shipping Method'),
+                    ])
+                    ->columns(2),
 
-            TextColumn::make('payment_method')
-                ->searchable(),
+                Infolists\Components\Section::make('Order Items')
+                    ->schema([
+                        Infolists\Components\RepeatableEntry::make('items')
+                            ->schema([
+                                Infolists\Components\TextEntry::make('product_name')
+                                    ->label('Product'),
+                                Infolists\Components\TextEntry::make('price')
+                                    ->label('Price')
+                                    ->money('IDR'),
+                                Infolists\Components\TextEntry::make('qty')
+                                    ->label('Quantity'),
+                                Infolists\Components\TextEntry::make('subtotal')
+                                    ->label('Subtotal')
+                                    ->money('IDR'),
+                            ])
+                            ->columns(4),
+                    ]),
 
-            TextColumn::make('payment_status')
-                ->searchable()
-                ->sortable(),
+                Infolists\Components\Section::make('Order Summary')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('subtotal')
+                            ->label('Subtotal')
+                            ->money('IDR'),
+                        Infolists\Components\TextEntry::make('shipping_total')
+                            ->label('Shipping')
+                            ->money('IDR'),
+                        Infolists\Components\TextEntry::make('discount_total')
+                            ->label('Discount')
+                            ->money('IDR'),
+                        Infolists\Components\TextEntry::make('grand_total')
+                            ->label('Grand Total')
+                            ->money('IDR')
+                            ->size(Infolists\Components\TextEntry\TextEntrySize::Large)
+                            ->weight('bold'),
+                    ])
+                    ->columns(2),
 
-            TextColumn::make('shipping_method')
-                ->searchable(),
-
-            SelectColumn::make('status')
-                ->options([
-                    'new' => 'New',
-                    'processing' => 'Processing',
-                    'shipped' => 'Shipped',
-                    'delivered' => 'Delivered',
-                    'cancelled' => 'Cancelled',
-                ])
-                ->searchable()
-                ->sortable(),
-
-            Tables\Columns\TextColumn::make('created_at')
-                ->dateTime()
-                ->sortable()
-                ->toggleable(isToggledHiddenByDefault: true),
-
-            Tables\Columns\TextColumn::make('updated_at')
-                ->dateTime()
-                ->sortable()
-                ->toggleable(isToggledHiddenByDefault: true),
-        ])
-        ->filters([
-            //
-        ])
-        ->actions([
-            Tables\Actions\ActionGroup::make([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\ViewAction::make(),
-                Tables\Actions\DeleteAction::make(),
-            ])
-        ])
-        ->bulkActions([
-            Tables\Actions\BulkActionGroup::make([
-                Tables\Actions\DeleteBulkAction::make(),
-            ]),
-        ]);
-}
+                Infolists\Components\Section::make('Notes')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('notes')
+                            ->label('Order Notes')
+                            ->placeholder('No notes')
+                            ->columnSpanFull(),
+                    ])
+                    ->collapsible()
+                    ->collapsed(),
+            ]);
+    }
 
     public static function getRelations(): array
     {
         return [
-            AddressRelationManager::class
+            RelationManagers\ItemsRelationManager::class,
         ];
     }
-
-    public static function getNavigationBadge(): ?string
-    {
-        return static::getModel()::count();
-    }
-
-    public static function getNavigationBadgeColor(): string|array|null
-    {
-        return static::getModel()::count() > 10 ? 'success' : 'danger';
-    }
-
-    public static function getWidgets(): array
-        {
-            return [
-                WidgetsOrderStats::class, // <--- PASTIKAN HANYA INI YANG ADA DI SINI
-            ];
-        }
 
     public static function getPages(): array
     {
@@ -319,5 +371,15 @@ class OrderResource extends Resource
             'view' => Pages\ViewOrder::route('/{record}'),
             'edit' => Pages\EditOrder::route('/{record}/edit'),
         ];
+    }
+
+    public static function getNavigationBadge(): ?string
+    {
+        return static::getModel()::where('status', 'pending')->count();
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return static::getNavigationBadge() > 0 ? 'warning' : null;
     }
 }
